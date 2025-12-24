@@ -8,6 +8,7 @@ def bilinear_koopman_loss(model, x_seq, u_seq, cfg):
     alpha = cfg['training']['loss_weights']['alpha']
     beta = cfg['training']['loss_weights']['beta']
     gamma = cfg['training']['loss_weights']['gamma']
+    l_spar = cfg['training']['loss_weights'].get('l_spar', 0.0)
 
     # 1. Prediction Loss (L1) - 논문 수식 (19) 반영
     x_flat = x_seq.reshape(-1, x_seq.shape[-1])
@@ -34,7 +35,7 @@ def bilinear_koopman_loss(model, x_seq, u_seq, cfg):
     # 3. Sparsity Loss (L3) - 논문 수식 (23) 반영 [cite: 457]
     loss_spar = torch.norm(model.H, p=1)
 
-    total_loss = loss_pred + alpha * loss_indep + beta * loss_spar
+    total_loss = alpha * loss_pred + beta * loss_indep + l_spar * loss_spar
 
     return total_loss, {
         'loss_pred': loss_pred.item(),
@@ -46,25 +47,25 @@ def train_epoch(model, dataloader, optimizer, cfg, device, x_scaler, u_scaler, s
     model.train()
     total_loss = 0
     logs = {'loss_pred':0, 'loss_indep':0, 'loss_spar':0}
-    
+
     # Use scaler if provided (Mixed Precision)
     use_amp = (scaler is not None)
-    
+
     for x_batch, u_batch in dataloader:
         x_batch = x_batch.float().to(device, non_blocking=True)
         u_batch = u_batch.float().to(device, non_blocking=True)
-        
+
         # Normalize
         x_norm = x_scaler.transform(x_batch)
         u_norm = u_scaler.transform(u_batch)
-        
+
         optimizer.zero_grad(set_to_none=True)  # Faster than zero_grad()
-        
+
         # Mixed Precision Context
         if use_amp:
             with torch.cuda.amp.autocast():
                 loss, batch_logs = bilinear_koopman_loss(model, x_norm, u_norm, cfg)
-            
+
             scaler.scale(loss).backward()
             # Gradient clipping
             scaler.unscale_(optimizer)
@@ -77,45 +78,45 @@ def train_epoch(model, dataloader, optimizer, cfg, device, x_scaler, u_scaler, s
             # Gradient clipping
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
-        
+
         total_loss += loss.item()
         for k, v in batch_logs.items():
             logs[k] += v
-            
+
     avg_loss = total_loss / len(dataloader)
     for k in logs:
         logs[k] /= len(dataloader)
-        
+
     return avg_loss, logs
 
 def validate(model, dataloader, cfg, device, x_scaler, u_scaler):
     model.eval()
     total_loss = 0
     logs = {'loss_pred':0, 'loss_indep':0, 'loss_spar':0}
-    
+
     # Determine if we should use AMP for val
     use_amp = (device.type == 'cuda')
-    
+
     with torch.no_grad():
         for x_batch, u_batch in dataloader:
             x_batch = x_batch.float().to(device, non_blocking=True)
             u_batch = u_batch.float().to(device, non_blocking=True)
-            
+
             x_norm = x_scaler.transform(x_batch)
             u_norm = u_scaler.transform(u_batch)
-            
+
             if use_amp:
                 with torch.cuda.amp.autocast():
                     loss, batch_logs = bilinear_koopman_loss(model, x_norm, u_norm, cfg)
             else:
                 loss, batch_logs = bilinear_koopman_loss(model, x_norm, u_norm, cfg)
-            
+
             total_loss += loss.item()
             for k, v in batch_logs.items():
                 logs[k] += v
-                
+
     avg_loss = total_loss / len(dataloader)
     for k in logs:
         logs[k] /= len(dataloader)
-        
+
     return avg_loss, logs
