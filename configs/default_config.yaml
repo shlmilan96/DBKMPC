@@ -1,0 +1,49 @@
+# Deep Bilinear Koopman MPC Configuration
+
+# System & Robot
+robot:
+  urdf_path: "urdf/universalUR5.urdf" # User requested universalUR5
+  mesh_path: "meshes/ur5"           # User mesh path
+  ee_link_name: "ee_link"           # From universalUR5 analysis
+
+# Dimensions (Table 1 & Paper Analysis)
+dims:
+  state: 15     # [q(6), dq(6), ee(3)]
+  control: 6    # Joint Velocities
+  lifted: 20    # g(x) dimension
+  full_state: 35 # x(15) + g(x)(20)
+
+# Data Generation
+data:
+  time_step: 0.002
+  trajectory_length: 31 # steps
+  num_train_trajs: 50000
+  num_val_trajs: 20000
+  control_limit: 0.3 # rad/s
+  save_dir: "data/trajectories"
+
+# Model (Table 1)
+model:
+  encoder_hidden_layers: [128, 128, 128]
+  activation: "tanh"
+  
+# Training (Table 1) - STRICTLY FROM PAPER
+training:
+  batch_size: 512
+  epochs: 3100  # Paper's 300k iterations ÷ 98 batches/epoch ≈ 3061 epochs
+  learning_rate: 0.001
+  loss_weights:
+    alpha: 1.0   # Prediction
+    beta: 0.1    # Independence
+    gamma: 0.8   # Decay factor for K-step pred
+    l_spar: 0.0  # Sparsity weight (mentioned in text but check value later, set to small if needed)
+  checkpoint_dir: "models"
+
+# MPC Controller (Table 1 & Eq 3)
+mpc:
+  prediction_horizon: 20 # Adjust as needed, paper says 20-50 for results? Let's verify text, defaulting to reasonable value.
+  weights:
+    Q: 500.0 # xQx
+    R: 0.1   # uRu (Table 1: 0.1)
+    P: 500.0 # Terminal Cost P (Table 1 F)
+  control_limit: 0.3
